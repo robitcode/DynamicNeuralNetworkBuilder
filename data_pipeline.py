@@ -1,6 +1,7 @@
 import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
 
 def process_csv_to_tensors(df, target_column):
     """
@@ -25,28 +26,33 @@ def process_csv_to_tensors(df, target_column):
         # pd.get_dummies automatically finds text columns and turns them into 0s and 1s.
         X = pd.get_dummies(X, drop_first=True)
         
-        # 5. Encode the Target (y)
-        # If the user is trying to predict "Yes/No" or "Malignant/Benign", we make it 1/0
-        if y.dtype == 'object' or y.name == 'category':
+        # 5. SMART TARGET ENCODING (Regression vs Classification)
+        # If it's a float, or if it has a ton of unique numbers, it's Regression
+        if y.dtype in ['float64', 'float32'] or (y.dtype in ['int64', 'int32'] and y.nunique() > 20):
+            task_type = 'regression'
+            y_processed = y.values
+            num_classes = 1 # Output layer just needs 1 node to spit out a number
+            y_tensor = torch.tensor(y_processed, dtype=torch.float32).view(-1, 1)
+        else:
+            task_type = 'classification'
             le = LabelEncoder()
             y_processed = le.fit_transform(y)
-        else:
-            y_processed = y.values
+            num_classes = len(le.classes_)
+            y_tensor = torch.tensor(y_processed, dtype=torch.long)
             
-        # 6. Standard Scale the Features
-        # Neural networks need all inputs to be on a similar scale (mean=0, variance=1)
+        # 6. Standard Scale the Features (X)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        
-        # 7. Convert to PyTorch Tensors
         X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-        # y must be shaped as a column vector for Binary Cross Entropy Loss
-        y_tensor = torch.tensor(y_processed, dtype=torch.float32).view(-1, 1)
         
-        # We also return X.shape[1] so the neural network knows how many input nodes it needs
+        # 7. The 80/20 Train/Test Split
+        from sklearn.model_selection import train_test_split
+        X_train, X_test, y_train, y_test = train_test_split(X_tensor, y_tensor, test_size=0.2, random_state=42)
+        
         input_dim = X.shape[1]
         
-        return X_tensor, y_tensor, input_dim
+        # CHANGED: We now return task_type as well!
+        return X_train, X_test, y_train, y_test, input_dim, num_classes, task_type
         
     except Exception as e:
-        return None, None, str(e)
+        return None, None, None, None, None, None, str(e)

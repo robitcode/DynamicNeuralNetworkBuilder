@@ -26,16 +26,21 @@ if uploaded_file is not None:
     # Process the data when the user clicks the button
     if st.sidebar.button("Process Data"):
         with st.spinner('Converting data to PyTorch Tensors...'):
-            X_tensor, y_tensor, input_dim_or_error = process_csv_to_tensors(df.copy(), target_col)
-            uploaded_file.seek(0)
-            if X_tensor is not None:
-                st.sidebar.success(f"Success! Detected {input_dim_or_error} input features.")
-                # Save the real data to session state
-                st.session_state['X_tensor'] = X_tensor
-                st.session_state['y_tensor'] = y_tensor
-                st.session_state['input_dim'] = input_dim_or_error
+            X_train, X_test, y_train, y_test, input_dim, num_classes, task_type = process_csv_to_tensors(df.copy(), target_col)
+        
+            if X_train is not None:
+                st.sidebar.success(f"Task detected as: {task_type}")
+                # Save ALL the splits to session state
+                st.session_state['X_train'] = X_train
+                st.session_state['X_test'] = X_test
+                st.session_state['y_train'] = y_train
+                st.session_state['y_test'] = y_test
+                st.session_state['input_dim'] = input_dim
+                st.session_state['num_classes'] = num_classes
+                st.session_state['task_type'] = task_type
+                
             else:
-                st.sidebar.error(f"Error processing data: {input_dim_or_error}")
+                st.sidebar.error(f"Error processing data: {num_classes_or_error}")
 
 st.sidebar.markdown("---")
 
@@ -64,10 +69,11 @@ if st.button("Build and Train Model"):
         st.error("⚠️ Please upload and process a CSV file first!")
     else:
         # Load the real data from session state
-        X_tensor = st.session_state['X_tensor']
-        y_tensor = st.session_state['y_tensor']
+        X_tensor = st.session_state['X_train']
+        y_tensor = st.session_state['y_train']
         input_dim = st.session_state['input_dim']
-        
+        num_classes = st.session_state['num_classes']
+
         # 1. DYNAMICALLY BUILD THE PYTORCH MODEL
         layers = []
         
@@ -81,8 +87,7 @@ if st.button("Build and Train Model"):
             layers.append(activation_dict[activation_choice])
             
         # Output Layer
-        layers.append(nn.Linear(neurons, 1))
-        layers.append(nn.Sigmoid())
+        layers.append(nn.Linear(neurons, num_classes))
         
         model = nn.Sequential(*layers)
         
@@ -90,7 +95,11 @@ if st.button("Build and Train Model"):
         st.code(model, language='python') 
         
         # 2. THE REAL PYTORCH TRAINING LOOP
-        criterion = nn.BCELoss() 
+        task = st.session_state['task_type']
+        if task == "regression":
+            criterion = nn.MSELoss()
+        else:
+            criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         
         progress_bar = st.progress(0)
@@ -121,3 +130,24 @@ if st.button("Build and Train Model"):
                 loss_chart.line_chart(loss_history)
                 
         st.success("Training Complete!")
+
+        # Model Evaluation
+        st.write("### 📊 Model Evaluation")
+        model.eval() 
+        
+        with torch.no_grad():
+            test_outputs = model(st.session_state['X_test'])
+            task_type = st.session_state['task_type']
+            if task_type == 'classification':
+                _, predicted = torch.max(test_outputs.data, 1)
+                total = st.session_state['y_test'].size(0)
+                correct = (predicted == st.session_state['y_test']).sum().item()
+                accuracy = 100 * correct / total
+                st.metric(label="Test Accuracy", value=f"{accuracy:.2f}%")
+                if accuracy > 80: st.balloons()
+                
+            elif task_type == 'regression':
+                # Calculate Mean Absolute Error (How far off we are on average)
+                mae = torch.mean(torch.abs(test_outputs - st.session_state['y_test'])).item()
+                st.metric(label="Average Prediction Error (MAE)", value=f"{mae:.2f}")
+                st.caption("Lower is better! This is how far off your predictions are from the actual sales numbers on average.")
