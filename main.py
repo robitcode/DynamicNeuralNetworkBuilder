@@ -3,9 +3,10 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import io
 from data_pipeline import process_csv_to_tensors
 
-st.title("🔥 Dynamic PyTorch Network Builder")
+st.title("Dynamic PyTorch Network Builder")
 
 # ==========================================
 # NEW: DATA UPLOAD & INGESTION SECTION
@@ -40,7 +41,7 @@ if uploaded_file is not None:
                 st.session_state['task_type'] = task_type
                 
             else:
-                st.sidebar.error(f"Error processing data: {num_classes_or_error}")
+                st.sidebar.error(f"Error processing data: {task_type}")
 
 st.sidebar.markdown("---")
 
@@ -65,7 +66,7 @@ activation_dict = {
 # ==========================================
 if st.button("Build and Train Model"):
     # 🚨 SECURITY CHECK: Ensure data was uploaded first
-    if 'X_tensor' not in st.session_state:
+    if 'X_train' not in st.session_state:
         st.error("⚠️ Please upload and process a CSV file first!")
     else:
         # Load the real data from session state
@@ -151,3 +152,30 @@ if st.button("Build and Train Model"):
                 mae = torch.mean(torch.abs(test_outputs - st.session_state['y_test'])).item()
                 st.metric(label="Average Prediction Error (MAE)", value=f"{mae:.2f}")
                 st.caption("Lower is better! This is how far off your predictions are from the actual sales numbers on average.")
+
+        # ==========================================
+        # 5. EXPORT THE TRAINED MODEL
+        # ==========================================
+        st.markdown("---")
+        st.write("### 💾 Export Model")
+        st.write("Download the trained PyTorch weights to use in production.")
+        
+        # 1. Create a buffer in memory
+        buffer = io.BytesIO()
+        
+        # 2. Save the model's learned weights (state_dict) into the buffer
+        torch.save(model.state_dict(), buffer)
+        
+        # 3. Create the Streamlit download button
+        st.download_button(
+            label="⬇️ Download PyTorch Model (.pth)",
+            data=buffer.getvalue(),
+            file_name="trained_dynamic_model.pth",
+            mime="application/octet-stream"
+        )
+        
+        # Add a helpful reminder for the user
+        st.info(f"**Deployment Note:** To load these weights later, you must recreate an architecture with: "
+                f"{input_dim} inputs, {num_layers - 1} hidden layers ({neurons} neurons each), "
+                f"and {num_classes} output(s).")
+        
